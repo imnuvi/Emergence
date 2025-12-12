@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Multi-Agent Simulation</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      background: #020617;
+      color: #e5e7eb;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .container {
+      display: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+
+    .sidebar {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 280px;
+      height: 100%;
+      max-width: 50%;
+      background: #020617;
+      border-right: 1px solid #111827;
+      display: flex;
+      z-index: 10;
+      flex-direction: column;
+      pointer-events: auto;
+      transition: transform 0.25s ease;
+      z-index: 10;
+    }
+
+
+    .sidebar.collapsed {
+      transform: translateX(-100%);
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #111827;
+      background: #020617;
+    }
+
+    .sidebar-header h1 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ca3af;
+    }
+
+    .toggle-btn {
+      border: none;
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 9999px;
+      padding: 0.25rem 0.75rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+
+    .toggle-btn:hover {
+      background: #1f2937;
+    }
+
+    .sidebar-content {
+      padding: 2.75rem 1rem 1rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .panel-section {
+      margin-bottom: 0.75rem;
+      padding: 0.8rem;
+      border-radius: 0.75rem;
+      background: #020617;
+      border: 1px solid #111827;
+    }
+
+    .panel-section h2 {
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      margin-bottom: 0.5rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.75rem;
+      margin-bottom: 0.25rem;
+      color: #9ca3af;
+    }
+
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 0.3rem 0.4rem;
+      border-radius: 0.4rem;
+      border: 1px solid #111827;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 0.8rem;
+      margin-bottom: 0.45rem;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      margin-top: 0.15rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .status-text {
+      font-size: 0.7rem;
+      color: #6b7280;
+      margin-top: -0.1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .inline-inputs {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .inline-inputs > div {
+      flex: 1;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 0.4rem 0.5rem;
+      font-size: 0.75rem;
+      border-radius: 9999px;
+      border: 1px solid #111827;
+      background: #020617;
+      color: #e5e7eb;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .btn.primary {
+      background: #4f46e5;
+      border-color: #4f46e5;
+    }
+
+    .btn.primary:hover {
+      background: #6366f1;
+    }
+
+    .btn:hover {
+      background: #111827;
+    }
+
+    .sidebar-handle {
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      z-index: 20;
+    }
+
+    .handle-btn {
+      border-radius: 9999px;
+      border: 1px solid #111827;
+      background: #020617cc;
+      color: #e5e7eb;
+      padding: 0.45rem 0.9rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: background 0.15s ease;
+    }
+
+    .handle-btn:hover {
+      background: #111827;
+    }
+
+
+    .viewport-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      flex: 1;
+      background: radial-gradient(circle at top left, #020617, #020617 55%, #000000 100%);
+    }
+
+
+    #viewport {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .overlay-info {
+      position: absolute;
+      bottom: 0.75rem;
+      left: 0.75rem;
+      padding: 0.4rem 0.7rem;
+      border-radius: 9999px;
+      font-size: 0.7rem;
+      background: #020617cc;
+      color: #9ca3af;
+      border: 1px solid #111827;
+      backdrop-filter: blur(6px);
+      pointer-events: none;
+    }
+
+    @media (max-width: 768px) {
+      .sidebar {
+        position: absolute;
+        height: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <h1>Controls</h1>
+        <button id="collapseBtn" class="toggle-btn">Hide</button>
+      </div>
+
+      <div class="sidebar-content">
+        <form id="paramsForm">
+          <div class="panel-section">
+            <h2>Mode</h2>
+            <label>Simulation space</label>
+            <input type="text" value="3D workspace" disabled />
+          </div>
+
+          <div class="panel-section">
+            <h2>Agents</h2>
+
+            <label for="numAgents">Number of agents</label>
+            <input type="number" id="numAgents" name="numAgents" min="1" max="2000" value="50" />
+
+            <label for="agentSpeed">Speed</label>
+            <input type="range" id="agentSpeed" name="agentSpeed" min="0" max="10" step="0.1" value="2" />
+            <div class="status-text">
+              Current: <span id="agentSpeedValue">2.0</span>
+            </div>
+
+            <label for="agentSize">Agent size</label>
+            <input type="range" id="agentSize" name="agentSize" min="0.05" max="0.5" step="0.01" value="0.1" />
+            <div class="status-text">
+              Current: <span id="agentSizeValue">0.10</span>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h2>Environment</h2>
+
+            <div class="inline-inputs">
+              <div>
+                <label for="envWidth">Width</label>
+                <input type="number" id="envWidth" name="envWidth" value="20" step="1" />
+              </div>
+              <div>
+                <label for="envHeight">Height</label>
+                <input type="number" id="envHeight" name="envHeight" value="20" step="1" />
+              </div>
+            </div>
+
+            <label>
+              <input type="checkbox" id="wrapAround" name="wrapAround" />
+              Wrap-around boundaries
+            </label>
+          </div>
+
+          <div class="panel-section">
+            <h2>Controls</h2>
+            <div class="btn-row">
+              <button type="button" id="applyBtn" class="btn primary">Apply</button>
+              <button type="button" id="resetBtn" class="btn">Reset</button>
+            </div>
+            <div class="btn-row">
+              <button type="button" id="playPauseBtn" class="btn">⏸ Pause</button>
+              <button type="button" id="stepBtn" class="btn">Step</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </aside>
+
+    <div class="sidebar-handle">
+      <button id="handleBtn" class="handle-btn">☰ Controls</button>
+    </div>
+
+    <main class="viewport-wrapper">
+      <canvas id="viewport"></canvas>
+      <div class="overlay-info">
+        Agents: <span id="infoAgents">0</span> · Mode: <span id="infoMode">3D</span>
+      </div>
+    </main>
+  </div>
+
+  <script type="importmap">
+          {
+          "imports": {
+              "three": "https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.module.js",
+              "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.181.0/examples/jsm/"
+          }
+      }
+    </script>
+
+  <script type="module">
+
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    class SimulationParams {
+      constructor() {
+        this.numAgents = 50;
+        this.agentSpeed = 2.0;
+        this.agentSize = 0.1;
+        this.envWidth = 20;
+        this.envHeight = 20;
+        this.envDepth = (this.envWidth + this.envHeight) / 2;
+        this.wrapAround = false;
+
+        this.interactionRadius = 5.0;
+        this.springK = 0.8;         
+        this.restLength = 2.0;      
+
+
+        this.form = document.getElementById("paramsForm");
+        this._bindUI();
+      }
+
+      _bindUI() {
+        const speedInput = document.getElementById("agentSpeed");
+        const sizeInput = document.getElementById("agentSize");
+        const speedValue = document.getElementById("agentSpeedValue");
+        const sizeValue = document.getElementById("agentSizeValue");
+
+        speedInput.addEventListener("input", () => {
+          speedValue.textContent = parseFloat(speedInput.value).toFixed(1);
+        });
+
+        sizeInput.addEventListener("input", () => {
+          sizeValue.textContent = parseFloat(sizeInput.value).toFixed(2);
+        });
+
+        // Initial labels
+        speedValue.textContent = parseFloat(speedInput.value).toFixed(1);
+        sizeValue.textContent = parseFloat(sizeInput.value).toFixed(2);
+      }
+
+      readFromForm() {
+        const f = this.form;
+        this.numAgents = parseInt(f.numAgents.value, 10) || 1;
+        this.agentSpeed = parseFloat(f.agentSpeed.value) || 0;
+        this.agentSize = parseFloat(f.agentSize.value) || 0.1;
+        this.envWidth = parseFloat(f.envWidth.value) || 20;
+        this.envHeight = parseFloat(f.envHeight.value) || 20;
+        this.envDepth = (this.envWidth + this.envHeight) / 2;
+        this.wrapAround = f.wrapAround.checked;
+      }
+
+      applyToUI() {
+        const f = this.form;
+        f.numAgents.value = this.numAgents;
+        f.agentSpeed.value = this.agentSpeed;
+        f.agentSize.value = this.agentSize;
+        f.envWidth.value = this.envWidth;
+        f.envHeight.value = this.envHeight;
+        f.wrapAround.checked = this.wrapAround;
+
+        document.getElementById("agentSpeedValue").textContent =
+          this.agentSpeed.toFixed(1);
+        document.getElementById("agentSizeValue").textContent =
+          this.agentSize.toFixed(2);
+      }
+    }
+
+    class Agent {
+      constructor(id, env, params) {
+        this.id = id;
+        this.env = env;
+        this.params = params;
+        this.force = new THREE.Vector3();
+
+        this.position = new THREE.Vector3(
+          (Math.random() - 0.5) * params.envWidth,
+          (Math.random() - 0.5) * params.envHeight,
+          (Math.random() - 0.5) * params.envDepth
+        );
+
+        const angle = Math.random() * Math.PI * 2;
+        this.velocity = new THREE.Vector3(
+          Math.cos(angle),
+          Math.sin(angle),
+          0
+        )
+          .normalize()
+          .multiplyScalar(params.agentSpeed);
+
+        
+        // const geo = new THREE.CircleGeometry(params.agentSize, 32);
+
+        const height = params.agentSize * 0.3;
+        const radius = params.agentSize;
+
+
+
+        const geo = new THREE.CylinderGeometry(radius, radius, height, 32);
+
+
+
+        const mat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color().setHSL(Math.random(), 0.7, 0.6),
+          side: THREE.DoubleSide
+        });
+
+        this.mesh = new THREE.Mesh(geo, mat);
+
+        this.mesh.rotation.x = Math.PI / 2;
+        this.mesh.position.copy(this.position);
+        env.scene.add(this.mesh);
+        env.world.add(this.mesh);
+
+      }
+
+      update(dt) {
+        const p = this.params;
+
+        this.velocity.addScaledVector(this.force, dt);
+        this.position.addScaledVector(this.velocity, dt);
+
+        const hw = p.envWidth / 2;
+        const hh = p.envHeight / 2;
+        const hd = p.envDepth / 2;
+
+
+
+        if (p.wrapAround) {
+          // wrap-around mode
+          if (this.position.x < -hw) this.position.x += p.envWidth;
+          if (this.position.x > hw) this.position.x -= p.envWidth;
+          if (this.position.y < -hh) this.position.y += p.envHeight;
+          if (this.position.y > hh) this.position.y -= p.envHeight;
+          if (this.position.z < -hd) this.position.z += p.envDepth;
+          if (this.position.z > hd) this.position.z -= p.envDepth;
+        } else {
+          // A: bounce boundaries (your choice)
+          if (this.position.x > hw || this.position.x < -hw) {
+            this.velocity.x *= -1;
+          }
+          if (this.position.y > hh || this.position.y < -hh) {
+            this.velocity.y *= -1;
+          }
+          if (this.position.z > hd || this.position.z < -hd) {
+            this.velocity.z *= -1;
+          }
+        }
+
+
+        this.force.set(0, 0, 0);
+
+
+        // Lets get creative and constrain agents to xy plane
+        this.position.z = 0;
+        this.mesh.position.z = 0;
+
+        this.velocity.z = 0;
+
+        this.mesh.position.copy(this.position);
+      }
+
+      dispose() {
+        this.env.scene.remove(this.mesh);
+        this.env.world.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        this.mesh.material.dispose();
+      }
+    }
+
+    class Environment {
+      constructor(canvas, params) {
+        this.canvas = canvas;
+        this.params = params;
+        this.agents = [];
+        this.isRunning = true;
+
+
+
+        this._setupThree();
+        this._createBoundary();
+        this.resetAgents();
+        this._createPlane();
+
+
+        this.linkGeometry = new THREE.BufferGeometry();
+
+        this.linkMaterial = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.25,
+            vertexColors: true 
+        });
+
+        this.linkLines = new THREE.LineSegments(this.linkGeometry, this.linkMaterial);
+
+        this.world.add(this.linkLines);
+
+
+        this.lastTime = performance.now();
+        this._animate = this._animate.bind(this);
+        requestAnimationFrame(this._animate);
+
+        window.addEventListener("resize", () => this._onResize());
+      }
+
+      _setupThree() {
+        this.renderer = new THREE.WebGLRenderer({
+          canvas: this.canvas,
+          antialias: true,
+        });
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x020617);
+
+        this.world = new THREE.Group();
+        this.world.rotation.x = -Math.PI / 2;
+        this.scene.add(this.world);
+
+        const aspect = window.innerWidth / window.innerHeight;
+        this.camera = new THREE.PerspectiveCamera(
+          45,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1000
+        );
+        this.camera.position.set(20, 20, 20);
+
+        // this.camera.lookAt(0, 0, 0);
+        // this.controls.target.set(0, 0, 0);
+
+
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.06;
+        this.controls.enablePan = false;
+
+
+        this.camera.lookAt(0, 0, 0);
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+        dir.position.set(20, 25, 15);
+        this.scene.add(ambient, dir);
+
+
+      }
+
+      _createBoundary() {
+        if (this.boundaryMesh) {
+          this.scene.remove(this.boundaryMesh);
+        }
+
+        const geo = new THREE.BoxGeometry(
+          this.params.envWidth,
+          this.params.envHeight,
+          this.params.envDepth
+        );
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x111827,
+          wireframe: true,
+          transparent: true,
+          opacity: 0.5,
+        });
+
+        this.boundaryMesh = new THREE.Mesh(geo, mat);
+
+        this.world.add(this.boundaryMesh);
+
+
+        this.boundaryMesh.position.set(0, 0, 0);
+        this.controls.target.set(0, 0, 0);
+        this.camera.lookAt(0, 0, 0);
+        this.controls.update();
+
+
+      }
+
+      _createPlane() {
+        if (this.plane) {
+          this.world.remove(this.plane);
+          this.plane.geometry.dispose();
+          this.plane.material.dispose();
+        }
+
+        const size = Math.max(this.params.envWidth, this.params.envHeight);
+
+        const geo = new THREE.PlaneGeometry(size, size);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x1e293b,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.4
+        });
+
+        this.plane = new THREE.Mesh(geo, mat);
+        // this.plane.rotation.x = -Math.PI / 2;  
+        this.plane.position.set(0, 0, 0);       
+        this.world.add(this.plane);
+      }
+
+
+      resetAgents() {
+        this.agents.forEach((a) => a.dispose());
+
+        this.agents = [];
+
+        for (let i = 0; i < this.params.numAgents; i++) {
+          this.agents.push(new Agent(i, this, this.params));
+        }
+
+        document.getElementById("infoAgents").textContent =
+          this.agents.length.toString();
+        document.getElementById("infoMode").textContent = "3D";
+      }
+
+      applyNewParams(params) {
+        this.params = params;
+        this._createBoundary();
+        this.resetAgents();
+
+        this.controls.target.set(0, 0, 0);
+        this.camera.lookAt(0, 0, 0);
+        this.controls.update();
+
+      }
+      updateConnectionsAndForces() {
+        const agents = this.agents;
+        const N = agents.length;
+
+        const R = this.params.interactionRadius;
+        const K = this.params.springK;
+        const L0 = this.params.restLength;
+
+        // instead of naive line segment creation, we are using lineBuffers to more efficiently render the connections.
+        const maxSegments = N * (N - 1) / 2;
+        if (!this.linePositions || this.linePositions.length !== maxSegments * 6) {
+            this.linePositions = new Float32Array(maxSegments * 6);  
+            this.lineColors = new Float32Array(maxSegments * 6);
+            this.linkGeometry.setAttribute("position", new THREE.BufferAttribute(this.linePositions, 3));
+            this.linkGeometry.setAttribute("color", new THREE.BufferAttribute(this.lineColors, 3));
+            this.linkMaterial.vertexColors = true;
+        }
+
+        let ptr = 0;
+
+        for (let i = 0; i < N; i++) {
+            const ai = agents[i];
+            const pi = ai.mesh.position;
+
+            for (let j = i + 1; j < N; j++) {
+                const aj = agents[j];
+                const pj = aj.mesh.position;
+
+                const dx = pj.x - pi.x;
+                const dy = pj.y - pi.y;
+                const dz = pj.z - pi.z;
+
+
+                const distSq = dx*dx + dy*dy + dz*dz;
+                const R2 = R * R;
+
+                // basically e are avoiding sqrt till we know for sure we needit
+                if (distSq > R2) continue;
+
+                const d = Math.sqrt(distSq);
+                const diff = d - L0;
+
+                // E: SPRING FORCE (Hooke's law)
+                const intensity = K * diff;
+                const fx = (dx / d) * intensity;
+                const fy = (dy / d) * intensity;
+                const fz = (dz / d) * intensity;
+
+                ai.force.x += fx;
+                ai.force.y += fy;
+                // ai.force.z += fz;  // if 2D, ignore z
+
+                aj.force.x -= fx;
+                aj.force.y -= fy;
+                // aj.force.z -= fz;
+
+                this.linePositions[ptr]     = pi.x;
+                this.linePositions[ptr + 1] = pi.y;
+                this.linePositions[ptr + 2] = pi.z;
+
+                this.linePositions[ptr + 3] = pj.x;
+                this.linePositions[ptr + 4] = pj.y;
+                this.linePositions[ptr + 5] = pj.z;
+
+                const t = Math.min(1, Math.abs(intensity) / (K * R));
+
+                const r = 1.0;
+                const g = 1.0 - t;
+                const b = 1.0 - t;
+
+                this.lineColors[ptr]     = r;
+                this.lineColors[ptr + 1] = g;
+                this.lineColors[ptr + 2] = b;
+
+                this.lineColors[ptr + 3] = r;
+                this.lineColors[ptr + 4] = g;
+                this.lineColors[ptr + 5] = b;
+
+                ptr += 6;
+            }
+        }
+
+        // update buffer ranges, so that we don't draw unused segments.
+        // pretty slick!
+        this.linkGeometry.setDrawRange(0, ptr / 3);
+
+        this.linkGeometry.attributes.position.needsUpdate = true;
+        this.linkGeometry.attributes.color.needsUpdate = true;
+      }
+
+
+      _onResize() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        this.camera.aspect = w / h;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(w, h);
+      }
+
+      _animate(now) {
+        const dt = (now - this.lastTime) / 1000;
+        this.lastTime = now;
+
+        if (this.isRunning) {
+          for (const agent of this.agents) {
+            agent.update(dt);
+            this.updateConnectionsAndForces(); 
+          }
+        }
+
+        this.controls.update();
+        this.renderer.render(this.scene, this.camera);
+        requestAnimationFrame(this._animate);
+      }
+
+      step(dt = 1 / 60) {
+        this.agents.forEach((a) => a.update(dt));
+        this.renderer.render(this.scene, this.camera);
+      }
+    }
+
+    const canvas = document.getElementById("viewport");
+    const params = new SimulationParams();
+    params.readFromForm();
+    params.applyToUI();
+    let env = new Environment(canvas, params);
+
+    const applyBtn = document.getElementById("applyBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const playPauseBtn = document.getElementById("playPauseBtn");
+    const stepBtn = document.getElementById("stepBtn");
+
+    applyBtn.addEventListener("click", () => {
+      params.readFromForm();
+      env.applyNewParams(params);
+    });
+
+    resetBtn.addEventListener("click", () => {
+
+      // reset to defaults
+      const fresh = new SimulationParams();
+      params.numAgents = fresh.numAgents;
+      params.agentSpeed = fresh.agentSpeed;
+      params.agentSize = fresh.agentSize;
+      params.envWidth = fresh.envWidth;
+      params.envHeight = fresh.envHeight;
+      params.envDepth = fresh.envDepth;
+      params.wrapAround = fresh.wrapAround;
+      params.applyToUI();
+      env.applyNewParams(params);
+    });
+
+    playPauseBtn.addEventListener("click", () => {
+      env.isRunning = !env.isRunning;
+      playPauseBtn.textContent = env.isRunning ? "⏸ Pause" : "▶ Play";
+    });
+
+    stepBtn.addEventListener("click", () => {
+      env.step();
+    });
+
+    const sidebar = document.getElementById("sidebar");
+    const collapseBtn = document.getElementById("collapseBtn");
+    const handleBtn = document.getElementById("handleBtn");
+
+    collapseBtn.addEventListener("click", () => {
+      sidebar.classList.add("collapsed");
+    });
+
+    handleBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("collapsed");
+    });
+  </script>
+</body>
+</html>
