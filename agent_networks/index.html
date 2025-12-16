@@ -336,7 +336,7 @@
 
     class SimulationParams {
       constructor() {
-        this.numAgents = 3;
+        this.numAgents = 15;
         this.agentSpeed = 10.0;
         this.agentSize = 0.1;
         this.envWidth = 20;
@@ -355,12 +355,17 @@
 
 
         // hyperparams
-        this.maxiter = 10000;
+        this.maxiter = 1000;
         // annealing to reduce jitter
         this.sigma = 0.99995;
+        
+        // if gamma is same for 100, then we consider convergence
+        this.maxconverge = 1000;
+        this.gammaTolerance = 1e-8;
+        this.temperature = 1.0;
 
         this.learningrate = 0.999;
-        this.stepsize = 3;
+        this.stepsize = 1.2;
 
 
         this.form = document.getElementById("paramsForm");
@@ -422,21 +427,21 @@
         this.params = params;
         this.force = new THREE.Vector3();
 
-        // this.position = new THREE.Vector3(
-        //   (Math.random() - 0.5) * params.envWidth,
-        //   (Math.random() - 0.5) * params.envHeight,
-        //   0
-        //   // o for 2d
-        //   // (Math.random() - 0.5) * params.envDepth
-        // );
-
         this.position = new THREE.Vector3(
-           this.id*2,
-          0,
+          (Math.random() - 0.5) * (params.envWidth/2),
+          (Math.random() - 0.5) * (params.envHeight/2),
           0
           // o for 2d
           // (Math.random() - 0.5) * params.envDepth
         );
+
+        // this.position = new THREE.Vector3(
+        //    this.id*2,
+        //   (Math.random()* 5),
+        //   0
+        //   // o for 2d
+        //   // (Math.random() - 0.5) * params.envDepth
+        // );
 
         this.newposition = this.position.clone();
 
@@ -462,7 +467,8 @@
 
 
         const mat = new THREE.MeshBasicMaterial({
-          color: new THREE.Color().setHSL(Math.random(), 0.7, 0.6),
+          // color: new THREE.Color().setHSL(Math.random(), 0.7, 0.6),
+          color: new THREE.Color().setHSL(0.7, 0.7, 0.6),
           side: THREE.DoubleSide
         });
 
@@ -476,7 +482,8 @@
       }
 
       getPositionMatrix(){
-        return [math.matrix([[this.position.x],[this.position.y],[this.position.z]]), math.matrix([[this.newposition.x],[this.newposition.y],[this.newposition.z]])];
+        return (this.position.x,this.position.y,this.position.z);
+        // return math.matrix([[this.position.x],[this.position.y],[this.position.z]]);
       }
 
       update(dt) {
@@ -549,7 +556,6 @@
           if (this.newposition.z > hd) this.newposition.z -= p.envDepth;
         } 
         
-
         this.newposition.addScaledVector(this.velocity, dt);
 
       }
@@ -602,6 +608,31 @@
 
         // This just calculates the P matrix once. We don't need it multiple times.
         this.P = this.buildPMatrix(this.params.numAgents);
+
+
+        this.gammahistory = [];
+        this.improving = true;
+
+
+        this.rho = this.params.rho2-0.1; // your cutoff distance
+
+        const maxEdges = this.agents.length * this.agents.length;
+
+        const positions = new Float32Array(maxEdges * 2 * 3);
+
+        this.edgeGeometry = new THREE.BufferGeometry();
+        this.edgeGeometry.setAttribute(
+          'position',
+          new THREE.BufferAttribute(positions, 3)
+        );
+
+        const material = new THREE.LineBasicMaterial({
+          color: 0xffffff,
+          linewidth: 1
+        });
+
+        this.edgeLines = new THREE.LineSegments(this.edgeGeometry, material);
+        this.scene.add(this.edgeLines);
 
 
         window.addEventListener("resize", () => this._onResize());
@@ -701,7 +732,7 @@
         });
 
         this.plane = new THREE.Mesh(geo, mat);
-        // this.plane.rotation.x = -Math.PI / 2;  
+        // this.plane.rotation.x = -Math.PI / 2;
         this.plane.position.set(0, 0, 0);       
         this.world.add(this.plane);
       }
@@ -715,6 +746,8 @@
         for (let i = 0; i < this.params.numAgents; i++) {
           this.agents.push(new Agent(i, this, this.params));
         }
+
+        this.spawnAgentsInXPattern();
 
         document.getElementById("infoAgents").textContent =
           this.agents.length.toString();
@@ -784,33 +817,121 @@
 
       }
 
+      randompos(pi){
 
-      calculateWeightedLaplacian(variable='position'){
+          let rx = Math.random() * 2 - 1;
+          let ry = Math.random() * 2 - 1;
+          let rz = 0;
+          // let rz = Math.random() * 2 - 1;
+
+
+          // let norm = Math.sqrt(rx*rx + ry*ry + rz*rz);
+          // rx /= norm;
+          // ry /= norm;
+          // rz /= norm;
+
+          let step = this.params.stepsize;
+
+          const newX = pi.x + rx * step;
+          const newY = pi.y + ry * step;
+          const newZ = pi.z + rz * step;
+          const newpos = new THREE.Vector3(newX, newY, newZ)
+          return newpos;
+
+      }
+
+      proposeNewPosition(positions, i){
+        //
+
+        const N = positions.length;
+        let newpositions = [];
+
+        if (i !== undefined){
+          const pi = positions[i];
+
+          newpositions  = positions.slice();
+          newpositions[i] = this.randompos(pi);
+        }
+
+        else{
+          for (let i = 0; i < N; i++) {
+
+            const pi = positions[i];
+            let newpos = this.randompos(pi);
+            newpositions.push(newpos);
+          }
+
+        }
+
+        return newpositions;
+        
+      }
+
+      updateEdges() {
+        // We save edges separately to reduce computation.
+          const agents = this.agents;
+          const rhoSq = this.rho * this.rho;
+
+          const posAttr = this.edgeGeometry.getAttribute('position');
+          const array = posAttr.array;
+
+          let ai = new THREE.Vector3();
+          let aj = new THREE.Vector3();
+
+
+          let ptr = 0;  
+
+          for (let i = 0; i < agents.length; i++) {
+            agents[i].mesh.getWorldPosition(ai);
+
+            for (let j = i + 1; j < agents.length; j++) {
+              agents[j].mesh.getWorldPosition(aj);
+
+              const dx = aj.x - ai.x;
+              const dy = aj.y - ai.y;
+              const dz = aj.z - ai.z;
+
+              const distSq = dx*dx + dy*dy + dz*dz;
+
+              if (distSq <= rhoSq) {
+                array[ptr++] = ai.x;
+                array[ptr++] = ai.y;
+                array[ptr++] = ai.z;
+
+                array[ptr++] = aj.x;
+                array[ptr++] = aj.y;
+                array[ptr++] = aj.z;
+              }
+            }
+          }
+
+          while (ptr < array.length) {
+            array[ptr++] = 0;
+          }
+
+          posAttr.needsUpdate = true;
+        }
+
+
+      calculateWeightedLaplacian(positions){
         // Initial positions and values
         const epsilon = this.params.epsilon;
         const rho1 = this.params.rho1;
         const rho2 = this.params.rho2;
 
-        const agents = this.agents;
-        // const weighted_laplacian = [];
-        const weighted_laplacian = Array.from({ length: agents.length }, () => new Array(agents.length).fill(0));
-        const agentconds = [];
+        const N = positions.length;
+        const weighted_laplacian = Array.from({ length: positions.length }, () => new Array(positions.length).fill(0));
 
-        let nimat, imat, njmat, jmat;
+        let conditions = true;
 
-        const N = agents.length;
         for (let i = 0; i < N; i++) {
-            const ai = agents[i];
-            // const pi = ai.mesh.position;
-            const pi = ai[variable];
+            const pi = positions[i];
 
             let weightsum = 0;
             // weighted_laplacian[i] = [];
 
             for (let j = 0; j < N; j++) {
-                const aj = agents[j];
-                // const pj = aj.mesh.position;
-                const pj = aj[variable];
+                const pj = positions[j];
 
                 if (i == j){
                   continue;
@@ -820,206 +941,196 @@
                 const dz = pj.z - pi.z;
 
                 const distSq = dx*dx + dy*dy + dz*dz;
-
                 const dist = Math.sqrt(distSq);
-                const weight = epsilon * math.exp((rho1 - dist) / (rho1 - rho2));
+
+                if (dist < rho1) {
+                  conditions = false;    
+                }
+
+                let weight;
+
+                // if (dist >= rho2) {
+                //     weight = 0;
+                // } else {
+                    weight = epsilon ** ((rho1 - dist) / (rho1 - rho2));
+                // }
+
+                // bad old logic
+                // const weight = epsilon * math.exp((rho1 - dist) / (rho1 - rho2));
+
                 weightsum += weight;
                 weighted_laplacian[i][j] = -weight;
                 weighted_laplacian[j][i] = -weight;
-
-                if (distSq >= this.params.rho1){
-                  agentconds.push(true);
-                }else{
-                  agentconds.push(false);
-                }
-
-                if (variable == 'position') {
-                  continue;
-                }
-
-                const opj = aj['position']; 
-                const opi = ai['position']; 
-                
-
-                const odx = opj.x - opi.x;
-                const ody = opj.y - opi.y;
-                const odz = opj.z - opi.z;
-
-                const odistSq = odx*odx + ody*ody + odz*odz;
-
-                [nimat, imat] = ai.getPositionMatrix();
-                [njmat, jmat] = aj.getPositionMatrix();
-
-                let subby = math.subtract(nimat,njmat);
-                let curdif = math.transpose(subby)
-                let oldif = math.subtract(imat,jmat);
-                let multdif = math.multiply(curdif, oldif);
-                // if (math.multiply(2,multdif) == distSq + odistSq ){
-                //   agentconds.push(true);
-                // }
             }
             weighted_laplacian[i][i] = weightsum;
         }
 
-        return [weighted_laplacian, agentconds];
+        // return weighted_laplacian;
+        return [conditions, weighted_laplacian];
 
       }
 
-      calculateparams(k=0){
+      linearizedDistanceConstraint(xi_old, xj_old, xi_new, xj_new, tolerance = 1e-6) {
+          // Constraint between old and new pos for distance
 
-        const numAgents = this.params.numAgents;
+
+            const odx = xi_old.x - xj_old.x;
+            const ody = xi_old.y - xj_old.y;
+            const odz = xi_old.z - xj_old.z;
+
+            const dij_old = Math.sqrt(odx*odx + ody*ody + odz*odz);
 
 
-        let weighted_laplacian, agentconds;
 
-        if (k == 0) {
-          [weighted_laplacian, agentconds] = this.calculateWeightedLaplacian('position');
-        }
-        else {
-          [weighted_laplacian, agentconds] = this.calculateWeightedLaplacian('newposition');
+            const ndx = xi_new.x - xj_new.x;
+            const ndy = xi_new.y - xj_new.y;
+            const ndz = xi_new.z - xj_new.z;
+
+            const dij_new = Math.sqrt(ndx*ndx + ndy*ndy + ndz*ndz);
+
+
+            const lhs = 2 * (ndx*odx + ndy*ody + ndz*odz);
+
+            const rhs = dij_new + dij_old;
+
+            return Math.abs(lhs - rhs) <= tolerance;
         }
         
-        // calculate constraints
-        // const PT = math.transpose(this.P);
-        // const PTL = math.multiply(PT, weighted_laplacian);
-        // const PTLP = math.multiply(PTL, this.P);
+        linearizedConstraintAll(oldpos, newpos, tolerance = 1e-6) {
 
-        // Applying constraints!!
-        // console.log('Weighted Laplacian:', weighted_laplacian);
-        const gamma = this.lambda2(weighted_laplacian);
-        const gammaI = gamma * math.identity(numAgents-1);
+            const N = newpos.length;
 
-        // const PTLP_minus_gammaI = math.subtract(PTLP, gammaI);
+            for (let i = 0; i < N; i++) {
+                for (let j = i + 1; j < N; j++) {
+                    if (!this.linearizedDistanceConstraint(oldpos[i], oldpos[j], newpos[i], newpos[j], tolerance)) {
+                        return false;
+                    }
+                }
+            }
 
-        return [gamma, agentconds];
-      }
+            return true;
+        }
+
+      spawnAgentsInXPattern() {
+        // Let's spawn them in a X pattern
+        const agents = this.agents;
+        const N = agents.length;
+
+        const half = Math.floor(N / 2);
+        const spacing = this.params.initialSpacing || 2.0;
+        const jitter = 0.8;
+
+        for (let i = 0; i < half; i++) {
+            const t = (i - (half-1)/2) * spacing;
+
+            let x = t;
+            let y = t;
+            let z = 0;
+            x += (Math.random()-0.5)*jitter;
+            y += (Math.random()-0.5)*jitter;
+
+
+            agents[i].position.set(x, y, z);
+            agents[i].mesh.position.set(x, y, z);
+        }
+
+        for (let i = half; i < N; i++) {
+            const j = i - half;
+            const t = (j - (N-half-1)/2) * spacing;
+
+            let x = t;
+            let y = -t;
+            let z = 0;
+
+            x += (Math.random()-0.5)*jitter;
+            y += (Math.random()-0.5)*jitter;
+
+            agents[i].position.set(x, y, z);
+            agents[i].mesh.position.set(x, y, z);
+        }
+    }
+
+
+
 
       connectivitySolver(){
 
         let ndistSq;
         let odistSq;
         let pi, pj, npi, npj;
-        let conditions = false;
-        let ngamma, ogamma, PTLP_minus_gammaI, nagentconds, oagentconds, bestgamma;
-        [ogamma,  oagentconds] = this.calculateparams(0);
+        let gamma, weighted_laplacian, PTLP_minus_gammaI, nagentconds, oagentconds, bestgamma, bestpos, conditions, improving;
+        let agents = this.agents;
+        let agentpositions = agents.map(agent => agent.position);
 
-        bestgamma = ogamma;
+        [conditions, weighted_laplacian] = this.calculateWeightedLaplacian(agentpositions);
 
-        for (let x = 0; x< this.params.maxiter; x++){
+        bestgamma = this.lambda2(weighted_laplacian);
 
-          [ngamma, nagentconds] = this.calculateparams(1);
+        bestpos = agentpositions;
 
-          if (ngamma > bestgamma) {
-            bestgamma = ngamma;
-            nagentconds.push(true);
-            conditions = true;
-          }else{
-            nagentconds.push(false);
-            conditions = false;
+
+
+        for (let i = 0; i < agentpositions.length; i++) {
+
+          let agentpos = agentpositions[i];
+          let newpositions = agentpositions.slice();
+          newpositions[i] = this.proposeNewPosition(agentpositions, i)[i];
+
+          for (let x = 0; x< this.params.maxiter; x++){
+
+            // let newpositions = this.proposeNewPosition(agentpositions);
+            // let newpositions = this.proposeNewPosition(agentpositions);
+
+            if (this.linearizedConstraintAll(agentpositions, newpositions, 1e-6)){
+              continue;
+            }
+
+            [conditions, weighted_laplacian] = this.calculateWeightedLaplacian(newpositions);
+
+            const gamma = this.lambda2(weighted_laplacian);
+
+            if (gamma > bestgamma && conditions == true){
+              bestgamma = gamma;
+              bestpos = newpositions;
+            }
+
+            this.gammahistory.push(bestgamma);
+
+            if (this.gammahistory.length > this.params.maxconverge){
+                this.gammahistory.shift();
+            }
+            if (this.gammahistory.length < this.params.maxconverge){
+                continue;
+            }
+
+            improving = false;
+
+            for (let i = 1; i < this.gammahistory.length; i++) {
+                if (this.gammahistory[i] - this.gammahistory[i-1] > this.params.gammaTolerance) {
+                    improving = true;
+                    break;
+                }
+            }
+
+            if (!improving) {
+              break;
+            }
           }
-
-          if (nagentconds.every(element => element === true)){
-            console.log('Every condition Sat!', x);
-            conditions = true;
-            break;
-          }
+          bestpos[i] = bestpos[i];
+          
         }
 
         // let efficiency = ngamma / (1 + Math.abs(ngamma))
+        agents.forEach((agent, index) => {
+          agent.position = bestpos[index];
+          agent.mesh.position.copy(agent.position);
+        });
+
+
+        improving = true;
 
         // this.params.sigma *= this.params.sigma;
-        console.log('gammas', ogamma, ngamma);
-        return conditions, ngamma;
-      }
-
-      updateConnectionsAndForces() {
-        const agents = this.agents;
-        const N = agents.length;
-
-        const R = this.params.interactionRadius;
-        const K = this.params.springK;
-        const L0 = this.params.restLength;
-
-        // instead of naive line segment creation, we are using lineBuffers to more efficiently render the connections.
-        const maxSegments = N * (N - 1) / 2;
-        if (!this.linePositions || this.linePositions.length !== maxSegments * 6) {
-            this.linePositions = new Float32Array(maxSegments * 6);  
-            this.lineColors = new Float32Array(maxSegments * 6);
-            this.linkGeometry.setAttribute("position", new THREE.BufferAttribute(this.linePositions, 3));
-            this.linkGeometry.setAttribute("color", new THREE.BufferAttribute(this.lineColors, 3));
-            this.linkMaterial.vertexColors = true;
-        }
-
-        let ptr = 0;
-
-        for (let i = 0; i < N; i++) {
-            const ai = agents[i];
-            const pi = ai.mesh.position;
-
-            for (let j = i + 1; j < N; j++) {
-                const aj = agents[j];
-                const pj = aj.mesh.position;
-
-                const dx = pj.x - pi.x;
-                const dy = pj.y - pi.y;
-                const dz = pj.z - pi.z;
-
-
-                const distSq = dx*dx + dy*dy + dz*dz;
-                const R2 = R * R;
-
-                // basically e are avoiding sqrt till we know for sure we needit
-                if (distSq > R2) continue;
-
-                const d = Math.sqrt(distSq);
-                const diff = d - L0;
-
-                // E: SPRING FORCE (Hooke's law)
-                const intensity = K * diff;
-                const fx = (dx / d) * intensity;
-                const fy = (dy / d) * intensity;
-                const fz = (dz / d) * intensity;
-
-                ai.force.x += fx;
-                ai.force.y += fy;
-                // ai.force.z += fz;  // if 2D, ignore z
-
-                aj.force.x -= fx;
-                aj.force.y -= fy;
-                // aj.force.z -= fz;
-
-                this.linePositions[ptr]     = pi.x;
-                this.linePositions[ptr + 1] = pi.y;
-                this.linePositions[ptr + 2] = pi.z;
-
-                this.linePositions[ptr + 3] = pj.x;
-                this.linePositions[ptr + 4] = pj.y;
-                this.linePositions[ptr + 5] = pj.z;
-
-                const t = Math.min(1, Math.abs(intensity) / (K * R));
-
-                const r = 1.0;
-                const g = 1.0 - t;
-                const b = 1.0 - t;
-
-                this.lineColors[ptr]     = r;
-                this.lineColors[ptr + 1] = g;
-                this.lineColors[ptr + 2] = b;
-
-                this.lineColors[ptr + 3] = r;
-                this.lineColors[ptr + 4] = g;
-                this.lineColors[ptr + 5] = b;
-
-                ptr += 6;
-            }
-        }
-
-        // update buffer ranges, so that we don't draw unused segments.
-        // pretty slick!
-        this.linkGeometry.setDrawRange(0, ptr / 3);
-
-        this.linkGeometry.attributes.position.needsUpdate = true;
-        this.linkGeometry.attributes.color.needsUpdate = true;
+        return [gamma, improving];
       }
 
 
@@ -1040,34 +1151,27 @@
 
         // this.params.stepsize *= this.params.learningrate;
 
-        if (this.isRunning) {
-          for (const agent of this.agents) {
+        // console.log(this.isRunning && this.improving);
 
-            let randchoice = math.random();
-            // if (randchoice < 0.5){
-              agent.newdirection(dt);
-            // }
+        if (this.isRunning && this.improving) {
 
-          let conditions, gamma = this.connectivitySolver();
+          let [gamma, improving] = this.connectivitySolver();
+          this.improving = improving;
           // let efficiency = gamma / (Math.abs(gamma) + 1);
-          // if (conditions) {
-          agent.setNewPosition();
-
           //   // agent.update(dt);
           //   // agent.newdirection(dt);
           //   // agent.setNewPosition();
           //   // this.updateConnectionsAndForces(); 
           // }
           // this.connectivitySolver();
-          }
-          // }
-
         }
+          // }
+          this.updateEdges();
 
-        this.controls.update();
-        this.renderer.render(this.scene, this.camera);
-        requestAnimationFrame(this._animate);
-      }
+          this.controls.update();
+          this.renderer.render(this.scene, this.camera);
+          requestAnimationFrame(this._animate);
+        }
 
       step(dt = 1 / 60) {
         this.agents.forEach((a) => a.update(dt));
