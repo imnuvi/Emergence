@@ -286,7 +286,7 @@
             </div>
 
             <label>
-              <input type="checkbox" id="wrapAround" name="wrapAround" />
+              <input type="checkbox" id="wrapAround" name="wrapAround" checked/>
               Wrap-around boundaries
             </label>
           </div>
@@ -318,6 +318,8 @@
     </main>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/14.8.1/math.js"></script>
+
   <script type="importmap">
           {
           "imports": {
@@ -334,17 +336,31 @@
 
     class SimulationParams {
       constructor() {
-        this.numAgents = 50;
-        this.agentSpeed = 2.0;
+        this.numAgents = 3;
+        this.agentSpeed = 10.0;
         this.agentSize = 0.1;
         this.envWidth = 20;
         this.envHeight = 20;
         this.envDepth = (this.envWidth + this.envHeight) / 2;
         this.wrapAround = false;
 
-        this.interactionRadius = 5.0;
-        this.springK = 0.8;         
-        this.restLength = 2.0;      
+        this.interactionRadius = 2.0;
+        this.springK = 0.2;         
+        this.restLength = 8.0;      
+
+        // optimization params
+        this.epsilon = 0.01;
+        this.rho1 = 1;
+        this.rho2 = 1.5;
+
+
+        // hyperparams
+        this.maxiter = 10000;
+        // annealing to reduce jitter
+        this.sigma = 0.99995;
+
+        this.learningrate = 0.999;
+        this.stepsize = 3;
 
 
         this.form = document.getElementById("paramsForm");
@@ -394,6 +410,8 @@
           this.agentSpeed.toFixed(1);
         document.getElementById("agentSizeValue").textContent =
           this.agentSize.toFixed(2);
+        document.getElementById("numAgents").value =
+          this.numAgents.toString();
       }
     }
 
@@ -404,11 +422,23 @@
         this.params = params;
         this.force = new THREE.Vector3();
 
+        // this.position = new THREE.Vector3(
+        //   (Math.random() - 0.5) * params.envWidth,
+        //   (Math.random() - 0.5) * params.envHeight,
+        //   0
+        //   // o for 2d
+        //   // (Math.random() - 0.5) * params.envDepth
+        // );
+
         this.position = new THREE.Vector3(
-          (Math.random() - 0.5) * params.envWidth,
-          (Math.random() - 0.5) * params.envHeight,
-          (Math.random() - 0.5) * params.envDepth
+           this.id*2,
+          0,
+          0
+          // o for 2d
+          // (Math.random() - 0.5) * params.envDepth
         );
+
+        this.newposition = this.position.clone();
 
         const angle = Math.random() * Math.PI * 2;
         this.velocity = new THREE.Vector3(
@@ -443,6 +473,10 @@
         env.scene.add(this.mesh);
         env.world.add(this.mesh);
 
+      }
+
+      getPositionMatrix(){
+        return [math.matrix([[this.position.x],[this.position.y],[this.position.z]]), math.matrix([[this.newposition.x],[this.newposition.y],[this.newposition.z]])];
       }
 
       update(dt) {
@@ -491,6 +525,40 @@
         this.mesh.position.copy(this.position);
       }
 
+      newdirection(dt) {
+
+        const nparams = this.params;
+
+        const angle = Math.random() * Math.PI * 2;
+
+        this.velocity = new THREE.Vector3(
+          Math.cos(angle),
+          Math.sin(angle),
+          0
+        )
+          .normalize()
+          .multiplyScalar(nparams.stepsize);
+
+        if (nparams.wrapAround) {
+          // wrap-around mode
+          if (this.newposition.x < -hw) this.newposition.x += p.envWidth;
+          if (this.newposition.x > hw) this.newposition.x -= p.envWidth;
+          if (this.newposition.y < -hh) this.newposition.y += p.envHeight;
+          if (this.newposition.y > hh) this.newposition.y -= p.envHeight;
+          if (this.newposition.z < -hd) this.newposition.z += p.envDepth;
+          if (this.newposition.z > hd) this.newposition.z -= p.envDepth;
+        } 
+        
+
+        this.newposition.addScaledVector(this.velocity, dt);
+
+      }
+
+      setNewPosition(){
+        this.position = this.newposition.clone();
+        this.mesh.position.copy(this.position);
+      }
+
       dispose() {
         this.env.scene.remove(this.mesh);
         this.env.world.remove(this.mesh);
@@ -531,6 +599,10 @@
         this.lastTime = performance.now();
         this._animate = this._animate.bind(this);
         requestAnimationFrame(this._animate);
+
+        // This just calculates the P matrix once. We don't need it multiple times.
+        this.P = this.buildPMatrix(this.params.numAgents);
+
 
         window.addEventListener("resize", () => this._onResize());
       }
@@ -659,6 +731,207 @@
         this.controls.update();
 
       }
+
+      buildPMatrix(n){
+        const randomInt = (min, max) => {
+          // return Math.floor(Math.random() * (max - min + 1)) + min;
+          return Math.random();
+        };
+
+        const ones = math.matrix(Array.from({length: n}, () => [1]));
+
+        const randmat = [];
+        for (let i = 0; i < n; i++) {
+          randmat[i] = [];
+          for (let j = 0; j < n-1; j++) {
+              randmat[i][j] = math.random(); 
+          }
+        }
+
+        const randommat = math.matrix(randmat);
+
+        // const matrixKL = math.multiply(matrixK, matrixL);
+        const numerator = math.multiply(math.transpose(ones), randommat);
+        const denom = math.multiply(math.transpose(ones), ones);
+
+        const c = math.dotDivide(numerator, denom);
+        const projection = math.multiply(ones,  c);
+
+        const B = math.subtract(randommat, projection);
+
+        const qr = math.qr(B);
+
+        const Q = qr.Q; 
+        // const R = qr.R;
+        return Q;
+      }
+
+      lambda1(L){
+        const eig = math.eigs(L);
+        const values = eig.values.valueOf();
+        values.sort((a, b) => a[0] - b[0])
+
+        return values[0];
+      }
+
+      lambda2(L){
+        const eig = math.eigs(L);
+        const values = eig.values;
+
+        const sorted = values.slice().sort((a, b) => a - b);
+
+        return sorted[1];
+
+      }
+
+
+      calculateWeightedLaplacian(variable='position'){
+        // Initial positions and values
+        const epsilon = this.params.epsilon;
+        const rho1 = this.params.rho1;
+        const rho2 = this.params.rho2;
+
+        const agents = this.agents;
+        // const weighted_laplacian = [];
+        const weighted_laplacian = Array.from({ length: agents.length }, () => new Array(agents.length).fill(0));
+        const agentconds = [];
+
+        let nimat, imat, njmat, jmat;
+
+        const N = agents.length;
+        for (let i = 0; i < N; i++) {
+            const ai = agents[i];
+            // const pi = ai.mesh.position;
+            const pi = ai[variable];
+
+            let weightsum = 0;
+            // weighted_laplacian[i] = [];
+
+            for (let j = 0; j < N; j++) {
+                const aj = agents[j];
+                // const pj = aj.mesh.position;
+                const pj = aj[variable];
+
+                if (i == j){
+                  continue;
+                }
+                const dx = pj.x - pi.x;
+                const dy = pj.y - pi.y;
+                const dz = pj.z - pi.z;
+
+                const distSq = dx*dx + dy*dy + dz*dz;
+
+                const dist = Math.sqrt(distSq);
+                const weight = epsilon * math.exp((rho1 - dist) / (rho1 - rho2));
+                weightsum += weight;
+                weighted_laplacian[i][j] = -weight;
+                weighted_laplacian[j][i] = -weight;
+
+                if (distSq >= this.params.rho1){
+                  agentconds.push(true);
+                }else{
+                  agentconds.push(false);
+                }
+
+                if (variable == 'position') {
+                  continue;
+                }
+
+                const opj = aj['position']; 
+                const opi = ai['position']; 
+                
+
+                const odx = opj.x - opi.x;
+                const ody = opj.y - opi.y;
+                const odz = opj.z - opi.z;
+
+                const odistSq = odx*odx + ody*ody + odz*odz;
+
+                [nimat, imat] = ai.getPositionMatrix();
+                [njmat, jmat] = aj.getPositionMatrix();
+
+                let subby = math.subtract(nimat,njmat);
+                let curdif = math.transpose(subby)
+                let oldif = math.subtract(imat,jmat);
+                let multdif = math.multiply(curdif, oldif);
+                // if (math.multiply(2,multdif) == distSq + odistSq ){
+                //   agentconds.push(true);
+                // }
+            }
+            weighted_laplacian[i][i] = weightsum;
+        }
+
+        return [weighted_laplacian, agentconds];
+
+      }
+
+      calculateparams(k=0){
+
+        const numAgents = this.params.numAgents;
+
+
+        let weighted_laplacian, agentconds;
+
+        if (k == 0) {
+          [weighted_laplacian, agentconds] = this.calculateWeightedLaplacian('position');
+        }
+        else {
+          [weighted_laplacian, agentconds] = this.calculateWeightedLaplacian('newposition');
+        }
+        
+        // calculate constraints
+        // const PT = math.transpose(this.P);
+        // const PTL = math.multiply(PT, weighted_laplacian);
+        // const PTLP = math.multiply(PTL, this.P);
+
+        // Applying constraints!!
+        // console.log('Weighted Laplacian:', weighted_laplacian);
+        const gamma = this.lambda2(weighted_laplacian);
+        const gammaI = gamma * math.identity(numAgents-1);
+
+        // const PTLP_minus_gammaI = math.subtract(PTLP, gammaI);
+
+        return [gamma, agentconds];
+      }
+
+      connectivitySolver(){
+
+        let ndistSq;
+        let odistSq;
+        let pi, pj, npi, npj;
+        let conditions = false;
+        let ngamma, ogamma, PTLP_minus_gammaI, nagentconds, oagentconds, bestgamma;
+        [ogamma,  oagentconds] = this.calculateparams(0);
+
+        bestgamma = ogamma;
+
+        for (let x = 0; x< this.params.maxiter; x++){
+
+          [ngamma, nagentconds] = this.calculateparams(1);
+
+          if (ngamma > bestgamma) {
+            bestgamma = ngamma;
+            nagentconds.push(true);
+            conditions = true;
+          }else{
+            nagentconds.push(false);
+            conditions = false;
+          }
+
+          if (nagentconds.every(element => element === true)){
+            console.log('Every condition Sat!', x);
+            conditions = true;
+            break;
+          }
+        }
+
+        // let efficiency = ngamma / (1 + Math.abs(ngamma))
+
+        // this.params.sigma *= this.params.sigma;
+        console.log('gammas', ogamma, ngamma);
+        return conditions, ngamma;
+      }
+
       updateConnectionsAndForces() {
         const agents = this.agents;
         const N = agents.length;
@@ -759,14 +1032,36 @@
       }
 
       _animate(now) {
+        // let efficiency = 0.00001;
+        // console.log(now)
+
         const dt = (now - this.lastTime) / 1000;
         this.lastTime = now;
 
+        // this.params.stepsize *= this.params.learningrate;
+
         if (this.isRunning) {
           for (const agent of this.agents) {
-            agent.update(dt);
-            this.updateConnectionsAndForces(); 
+
+            let randchoice = math.random();
+            // if (randchoice < 0.5){
+              agent.newdirection(dt);
+            // }
+
+          let conditions, gamma = this.connectivitySolver();
+          // let efficiency = gamma / (Math.abs(gamma) + 1);
+          // if (conditions) {
+          agent.setNewPosition();
+
+          //   // agent.update(dt);
+          //   // agent.newdirection(dt);
+          //   // agent.setNewPosition();
+          //   // this.updateConnectionsAndForces(); 
+          // }
+          // this.connectivitySolver();
           }
+          // }
+
         }
 
         this.controls.update();
@@ -782,8 +1077,8 @@
 
     const canvas = document.getElementById("viewport");
     const params = new SimulationParams();
-    params.readFromForm();
     params.applyToUI();
+    params.readFromForm();
     let env = new Environment(canvas, params);
 
     const applyBtn = document.getElementById("applyBtn");
