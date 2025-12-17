@@ -818,10 +818,49 @@
       }
 
       randompos(pi){
+          // Random direction in the XY-plane
+        // let rx = Math.random()*2 - 1;
+        // let ry = Math.random()*2 - 1;
+        // let rz = 0;
 
-          let rx = Math.random() * 2 - 1;
-          let ry = Math.random() * 2 - 1;
-          let rz = 0;
+        // let maxLen = 10;
+        // let minLen = 0.1;
+
+        // // Normalize direction
+        // let norm = Math.sqrt(rx*rx + ry*ry);
+        // if (norm < 1e-12) { rx = 1; ry = 0; norm = 1; }
+
+        // rx /= norm;
+        // ry /= norm;
+
+        // // Random magnitude between minLen and maxLen
+        // const magnitude = Math.random() * (maxLen - minLen) + minLen;
+
+        // // Apply magnitude
+        // rx *= magnitude;
+        // ry *= magnitude;
+        // let rx = Math.random() * (2 - 0.001) + 0.2;   // 0.2 → 5
+        // let ry = Math.random() * (2 - 0.001) + 0.2;   // 0.2 → 5
+        // let rz = 0;
+        let angle = Math.random() * 2 * Math.PI;
+        let xdir = Math.random() < 0.5 ? -1 : 1;
+        let ydir = Math.random() < 0.5 ? -1 : 1;
+
+        let minval = 0.1 
+        let maxval = 2.0
+
+        let rrx = minval + Math.random() * (maxval - minval); 
+        let rry = minval + Math.random() * (maxval - minval); 
+
+        let rx = Math.cos(angle) * rrx;
+        let ry = Math.sin(angle) * rry;
+        let rz = 0;
+
+
+
+          // let rx = Math.random() * 2 - 1;
+          // let ry = Math.random() * 2 - 1;
+          // let rz = 0;
           // let rz = Math.random() * 2 - 1;
 
 
