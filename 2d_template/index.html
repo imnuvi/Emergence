@@ -414,7 +414,7 @@
         this.velocity = new THREE.Vector3(
           Math.cos(angle),
           Math.sin(angle),
-          (Math.random() - 0.5)
+          0
         )
           .normalize()
           .multiplyScalar(params.agentSpeed);
@@ -427,9 +427,7 @@
 
 
 
-        // const geo = new THREE.CylinderGeometry(radius, radius, height, 32);
-        const geo = new THREE.SphereGeometry(radius, 32, 16)
-        // const geo = new THREE.CylinderGeometry(radius, radius, height, 32);
+        const geo = new THREE.CylinderGeometry(radius, radius, height, 32);
 
 
 
@@ -485,10 +483,10 @@
 
 
         // Lets get creative and constrain agents to xy plane
-        // this.position.z = 0;
-        // this.mesh.position.z = 0;
+        this.position.z = 0;
+        this.mesh.position.z = 0;
 
-        // this.velocity.z = 0;
+        this.velocity.z = 0;
 
         this.mesh.position.copy(this.position);
       }
@@ -513,7 +511,7 @@
         this._setupThree();
         this._createBoundary();
         this.resetAgents();
-        // this._createPlane();
+        this._createPlane();
 
 
         this.linkGeometry = new THREE.BufferGeometry();
@@ -613,6 +611,30 @@
 
       }
 
+      _createPlane() {
+        if (this.plane) {
+          this.world.remove(this.plane);
+          this.plane.geometry.dispose();
+          this.plane.material.dispose();
+        }
+
+        const size = Math.max(this.params.envWidth, this.params.envHeight);
+
+        const geo = new THREE.PlaneGeometry(size, size);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x1e293b,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.4
+        });
+
+        this.plane = new THREE.Mesh(geo, mat);
+        // this.plane.rotation.x = -Math.PI / 2;  
+        this.plane.position.set(0, 0, 0);       
+        this.world.add(this.plane);
+      }
+
+
       resetAgents() {
         this.agents.forEach((a) => a.dispose());
 
@@ -687,11 +709,11 @@
 
                 ai.force.x += fx;
                 ai.force.y += fy;
-                ai.force.z += fz;  // if 2D, ignore z
+                // ai.force.z += fz;  // if 2D, ignore z
 
                 aj.force.x -= fx;
                 aj.force.y -= fy;
-                aj.force.z -= fz;
+                // aj.force.z -= fz;
 
                 this.linePositions[ptr]     = pi.x;
                 this.linePositions[ptr + 1] = pi.y;
